@@ -1,0 +1,5 @@
+[env]
+DISCORD_BOT_OWNER = { value = ""}
+DISCORD_TOKEN = { value = "" }
+MEILI_SERVER_HOST = { value = ""}
+MEILI_MASTER_KEY = {value = ""}
