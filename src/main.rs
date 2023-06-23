@@ -1,6 +1,8 @@
 use std::env;
 
+mod baichat_rs;
 use std::result::Result;
+use baichat_rs::Delta;
 use meilisearch_sdk::search::{SearchResult, SearchResults};
 use serenity::http::Typing;
 use serenity::{async_trait, client};
@@ -118,7 +120,7 @@ async fn interpret(ctx: &Context, arg_msg: &Message, mut args: Args) -> CommandR
         .index(database::DBIndexes::RawMessage.as_str())
         .search()
         .with_sort(&["timestamp:desc", "username:desc", "message:desc"])
-        .with_limit(100)
+        .with_limit(10)
         .execute::<RawMessage>()
         .await
         .unwrap();
@@ -126,8 +128,25 @@ async fn interpret(ctx: &Context, arg_msg: &Message, mut args: Args) -> CommandR
     msgs.hits.sort_by(|a,b| {
         a.result.timestamp.cmp(&b.result.timestamp)
     });
-    println!("{:?}", msgs);
-    let res = arg_msg.reply(&ctx.http, format!("{:?}", msgs)).await;
+
+
+    let mut prompt: String = "Leia as mensagens e finja que você está participando da conversa, me dê uma resposta que poderia responder os participantes.".into();
+
+    for raw_message in msgs.hits {
+        let raw_message: RawMessage = raw_message.result;
+        prompt += &format!("Usuário {}, no tempo {}, disse: \"{}\"\n", 
+                            raw_message.user_name, 
+                            serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                            raw_message.message);
+    }
+
+    let mut AI = baichat_rs::ThebAI::new(None);
+    let answer: Vec<Delta> = AI.ask(&prompt, None).await.expect("answer");
+    let answer = answer[answer.len() - 1].text.clone();
+
+
+    println!("{:?}", prompt);
+    let res = arg_msg.reply(&ctx.http, format!("{} \n\n {}", prompt, answer)).await;
     match res {
         Ok(i)=>{
             println!("{:?}", i)
