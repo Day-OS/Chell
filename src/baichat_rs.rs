@@ -1,9 +1,10 @@
 //FROM https://crates.io/crates/baichat-rs/0.1.0
-//MODIFIED BECAUSE THE CODE WAS COMPLETE SHIT
+//MODIFIED BECAUSE THE CODE WAS COMPLETE redacted
 
-use ratmom::{prelude::*, Request};
+use ratmom::{prelude::*, Request, config::SslOption};
 
 use serde::{Serialize, Deserialize};
+use serde_json::json;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Delta {
@@ -58,10 +59,10 @@ impl ThebAI {
 
         let mut body = String::new();
         body.push_str(r#"{
-            "prompt": ""#);
-        body.push_str(&prompt);
+            "prompt": "#);
+        body.push_str(&json!(prompt).to_string());
         if let Some(parent_message_id) = parent_message_id {
-            body.push_str(r#"",
+            body.push_str(r#",
             "options": {
                 "parentMessageId": ""#);
             body.push_str(parent_message_id.as_str());
@@ -77,6 +78,7 @@ impl ThebAI {
                 }
             }"#);
         }
+        //println!("{}", body);
         let mut request = Request::builder()
             .method("POST")
             .uri("https://chatbot.theb.ai/api/chat-process")
@@ -86,23 +88,26 @@ impl ThebAI {
             //.header("Host", "chatbot.theb.ai")
             .header("Referer", "https://chatbot.theb.ai")
             .header("Origin", "https://chatbot.theb.ai")
+            .ssl_options(SslOption::DANGER_ACCEPT_INVALID_CERTS | SslOption::DANGER_ACCEPT_INVALID_HOSTS | SslOption::DANGER_ACCEPT_REVOKED_CERTS)
             .body(body)?
             .send()?;
     
         let result = request.text()?;
     
         let mut deltas: Vec<Delta> = Vec::new();
+        //println!("{:?}", result.lines());
         for line in result.lines() {
             if line == "" {
                 continue;
             }
+            
             let delta:  Delta = serde_json::from_str(line).unwrap();
             deltas.push(delta);
         }
 
         self.parent_message_id = Some(deltas.last().unwrap().id.clone());
     
-        println!("{:?}", deltas);
+        //println!("{:?}", deltas);
     
         return Ok(deltas);
     }
