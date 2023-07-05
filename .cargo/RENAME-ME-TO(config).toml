@@ -3,3 +3,5 @@ DISCORD_BOT_OWNER = { value = ""}
 DISCORD_TOKEN = { value = "" }
 MEILI_SERVER_HOST = { value = ""}
 MEILI_MASTER_KEY = {value = ""}
+WHITELISTED_CHANNEL = {value = ""}
+PARENT_MESSAGE_ID_GPT = {value = "Play a character who is a {THING} named {NAME}, {DESCRIBE}. You only need to reply to ONE message. Your messages should be short."}
