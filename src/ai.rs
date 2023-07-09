@@ -2,6 +2,7 @@ use crate::{baichat_rs::{self, ThebAI, Delta}, ai};
 
 use serde::{Serialize, Deserialize};
 use std::env;
+use lazy_static;
 
 #[derive(Debug)]
 pub enum Error{
@@ -33,16 +34,21 @@ pub async fn reply(mut logs: String, memories: Option<String>) -> Result<ai::Res
      logs
     );
     
-    let mut ai: baichat_rs::ThebAI = get_ai();
-    let answer: Vec<Delta> = match ai.ask(&prompt, Some(env::var("PARENT_MESSAGE_ID_GPT").unwrap())).await {
-        Ok(message) => message,
-        Err(_) => {return  Err(Error::CouldntGenerateResponseFromAI)}
-    };
-    let answer: String = answer[answer.len() - 1].text.clone();
-    println!("PROMPT: {}", answer);
-    let inputmsg: ai::ResponseMessage = match serde_json::from_str(&answer) {
-        Ok(memory)=>{memory}
-        Err(_)=>{return Err(Error::CouldntConvertToJSON)}
-    };
-    Ok(inputmsg)
+    let mut baichat: baichat_rs::ThebAI = get_ai();
+
+    for i in 0..3 {
+        log::info!("GENERATING MESSAGE - try #{}", i);
+        println!("GENERATING MESSAGE - try #{}", i);
+        let answer = match baichat.ask_single(&prompt, Some(env::var("PARENT_MESSAGE_ID_GPT").unwrap())).await {
+            Ok(message) => message,
+            Err(_) => continue
+        };
+        //let answer: String = baichat_rs::delta_to_string(answer).await;
+        let inputmsg: ai::ResponseMessage = match serde_json::from_str(&answer.text) {
+            Ok(memory)=>{memory}
+            Err(_)=> continue
+        };
+        return Ok(inputmsg)
+    }
+    return Err(Error::CouldntGenerateResponseFromAI)
 }

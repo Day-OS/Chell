@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 use crate::{utils::{self, DBIndexes}, topics::Topics, ai};
-
+use crate::Timestamp;
 
 #[derive(Serialize, Deserialize, Debug, Clone,)]
 pub struct Memory{
@@ -10,28 +10,47 @@ pub struct Memory{
 }
 #[derive(Debug)]
 pub struct SavedMemories(pub String);
+#[derive(Debug)]
+pub struct LoadedMemories(pub Vec<Memory>);
+impl LoadedMemories {
+  pub async fn to_string(&self) -> String{
+    let mut memories :String = "".into();
+    for r in self.0.clone() {
+      memories += &format!("{}\n", r.content);
+    }
+    memories
+  }
+}
 
-pub async fn load_memory_from_db(topics: Topics) -> Option<String>{
-  let mut memories :String = "".into();
+pub async fn load_last_n_memories(n: usize, max_timestamp: Option<u64>) -> Result<LoadedMemories, utils::Error>{
+  let hits =  match utils::get_database_client()
+    .index(DBIndexes::InputMemory.as_str())
+    .search()
+    .with_filter(&format!("timestamp < {}", max_timestamp.unwrap_or(Timestamp::now().unix_timestamp() as u64)))
+    .with_limit(n)
+    .execute::<Memory>().await{
+        Ok(pages)=>{pages},
+        Err(_)=>{return Err(utils::Error::NoMemoriesFound)}
+  }.hits;
+
+  Ok(LoadedMemories(hits.into_iter().map(|result| result.result).collect()))
+}
+
+pub async fn load_memory(topics: Topics) -> Result<LoadedMemories, utils::Error>{
+  let memories :String = "".into();
   let hits =  match utils::get_database_client()
     .index(DBIndexes::InputMemory.as_str())
     .search().with_query(&topics.to_query())
     .with_limit(1)
     .execute::<Memory>().await{
         Ok(pages)=>{pages},
-        Err(_)=>{return None}
+        Err(_)=>{return Err(utils::Error::NoMemoriesFound)}
   }.hits;
-  for r in hits {
-    memories += &format!("{}\n", r.result.content);
-  }
-  if !memories.is_empty() {
-    return Some(memories)
-  }
-  None
+  Ok(LoadedMemories(hits.into_iter().map(|result| result.result).collect()))
 }
 
 
-pub async fn save_memory_to_db(input_memory: &ai::ResponseMessage) -> Result<SavedMemories, utils::Error>{
+pub async fn save_memory(input_memory: &ai::ResponseMessage) -> Result<SavedMemories, utils::Error>{
   let learned: String = match &input_memory.learned {
       Some(learned)=>{if learned.to_lowercase() == "null"{return Err(utils::Error::NoMemoriesToBeSaved)} learned.to_string()}
       None=>{return Err(utils::Error::NoMemoriesToBeSaved)}

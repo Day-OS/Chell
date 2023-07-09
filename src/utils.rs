@@ -5,9 +5,11 @@ pub enum Error{
     PrivateChannelUserIsNotOwner,
     Generic,
     NoTopicsFound,
-    NoMemoriesToBeSaved
+    NoMemoriesToBeSaved,
+    NoMemoriesFound,
+    NoMessagesFound,
+    NoReferencedMessageFound(String)
 }
-
 
 
 

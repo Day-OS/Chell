@@ -1,7 +1,7 @@
 use async_recursion::async_recursion;
-use futures::FutureExt;
+use meilisearch_sdk::documents::DocumentQuery;
 use serde::{Serialize, Deserialize};
-use serenity::{http::Http, model::prelude::{Message, Channel}};
+use serenity::{http::Http, model::prelude::{Message, ChannelId}};
 
 use crate::utils;
 
@@ -15,12 +15,13 @@ pub struct RawMessage {
   pub timestamp: i64,
   pub user_image: String,
   pub message: String,
-  pub reference_id: Option<u64>
+  pub reference_id: Option<u64>,
+  pub read: bool,
 }
 
 
 #[derive(Debug)]
-pub struct SavedMessagesFromChannel{pub channel_name:String,pub quantity:usize}
+pub struct SavedMessagesFromChannel{pub channel_id:u64,pub quantity:usize}
 
 #[derive(Debug)]
 pub struct SavedMessage(pub String);
@@ -29,9 +30,8 @@ pub struct SavedMessage(pub String);
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChatLogs(pub Vec<RawMessage>);
 impl ChatLogs {
-    pub async fn to_string(&self) -> String{
+    pub async fn build(&self, target_message_id: Option<u64>) -> String{
       let bot_id = crate::get_bot_id().await;
-      println!("BOOOOOOOOOOOOOOOT ID!!!!!!!!!!!!!!!1 {}", bot_id);
       let mut messages: String = "".into();
       for raw_message in self.0.clone() {
         if raw_message.user == bot_id {
@@ -41,19 +41,53 @@ impl ChatLogs {
                         );
         }
         else{
-            messages += &format!("ID DA MENSAGEM: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                            raw_message.id,
-                            serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                            raw_message.user_name, 
-                            raw_message.message
-                        );
+            if target_message_id.is_some(){
+                if raw_message.id == target_message_id.unwrap() {
+                    messages += &format!("ID DA MENSAGEM QUE PRECISA SER RESPONDIDO: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
+                    raw_message.id,
+                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                    raw_message.user_name, 
+                    raw_message.message);
+                }
+                else{
+                    messages += &format!("MENSAGEM PARA CONTEXTO | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
+                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                    raw_message.user_name, 
+                    raw_message.message);
+                }
+            }
+            else{
+                messages += &format!("ID DA MENSAGEM: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
+                raw_message.id,
+                serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                raw_message.user_name, 
+                raw_message.message);
+            }
         }
       }
       messages
     }
+    pub fn filter_read(&mut self){
+        self.0 = self.0.clone().into_iter().filter(|msg| !msg.read).collect();
+    }
     pub fn get_ids(&self) -> Vec<u64>{
         self.0.clone().into_iter().map(|log|{log.id}).collect()
     }
+}
+
+
+pub async fn set_read(logs: ChatLogs) -> Result<(), utils::Error>{
+    let logs: Vec<RawMessage> = logs.0.into_iter().map(|mut message| {message.read = true; message}).collect();
+    match  utils::get_database_client()
+    .index(utils::DBIndexes::RawMessage.as_str())
+    .add_or_replace(&logs, None)
+    .await{
+      Ok(_)=>{
+        log::info!("The following messages were set as read in database: {:?}", logs)
+      }
+      Err(e)=>{return Err(utils::Error::MeiliSearchError(e))}   
+    };
+    Ok(())
 }
 
 pub async fn delete_logs(logs: ChatLogs) -> Result<(), utils::Error>{
@@ -67,24 +101,26 @@ pub async fn delete_logs(logs: ChatLogs) -> Result<(), utils::Error>{
       Err(e)=>{return Err(utils::Error::MeiliSearchError(e))}   
     };
     Ok(())
-  }
+}
+
+
+pub async fn get_specific_message(target_message:u64) -> Result<RawMessage, utils::Error>{
+    let raw_message = DocumentQuery::new( &utils::get_database_client().index(utils::DBIndexes::RawMessage.as_str()))
+        .execute::<RawMessage>(&target_message.to_string())
+        .await;
+        match raw_message{
+            Ok(raw_message) => {return Ok(raw_message)}
+            Err(e)=>{ return Err(utils::Error::NoReferencedMessageFound(e.to_string()))}
+        }
+}
 
 pub async fn get_conversation_with_user(target_message:u64) -> Result<ChatLogs, utils::Error>{
-    async fn search_message_from_id(target_message: u64) -> Result<RawMessage, utils::Error>{
-        let raw_messages_searched = utils::get_database_client()
-        .index(utils::DBIndexes::RawMessage.as_str())
-        .search()
-        .with_query(&target_message.to_string())
-        .with_sort(&["timestamp:desc", "username:desc", "message:desc"])
-        .with_limit(1)
-        .execute::<RawMessage>()
-        .await.unwrap();
-        Ok(raw_messages_searched.hits.first().unwrap().result.clone())
-    }
     #[async_recursion]
     async fn get_referenced_message(target_message: u64, mut total_messages: &mut Vec<RawMessage>) -> (){
-        //println!("{:?}", total_messages);
-        let new_target: RawMessage = search_message_from_id(target_message).await.unwrap();
+        println!("{:?}", total_messages);
+        let new_target_result = get_specific_message(target_message).await;
+        if new_target_result.is_err(){return} 
+        let new_target = new_target_result.unwrap();
         total_messages.push(new_target.clone());
         if new_target.reference_id.is_some() {
             get_referenced_message(new_target.reference_id.unwrap(), &mut total_messages).await;
@@ -99,17 +135,6 @@ pub async fn get_conversation_with_user(target_message:u64) -> Result<ChatLogs, 
     Ok(ChatLogs(messages))
 }
 
-pub async fn get_specific_message(target_message:u64) -> Result<RawMessage, utils::Error>{
-    let raw_messages_searched = utils::get_database_client()
-        .index(utils::DBIndexes::RawMessage.as_str())
-        .search()
-        .with_query(&target_message.to_string())
-        .with_sort(&["timestamp:desc", "username:desc", "message:desc"])
-        .with_limit(1)
-        .execute::<RawMessage>()
-        .await.unwrap();
-    Ok(raw_messages_searched.hits.first().unwrap().result.clone())
-}
 
 
 pub async fn get_last_n_messages(n: usize) -> Result<ChatLogs, utils::Error>{
@@ -117,78 +142,43 @@ pub async fn get_last_n_messages(n: usize) -> Result<ChatLogs, utils::Error>{
     .index(utils::DBIndexes::RawMessage.as_str())
     .search()
     .with_filter("message IS NOT EMPTY")
-    .with_sort(&["timestamp:desc", "username:desc", "message:desc"])
+    .with_sort(&["timestamp:desc"])
     .with_limit(n)
     .execute::<RawMessage>()
     .await{
       Ok(msg)=>{msg}
       Err(e)=>{return Err(utils::Error::MeiliSearchError(e))}   
     };
-  
     raw_messages_searched.hits.sort_by(|a,b| {a.result.timestamp.cmp(&b.result.timestamp)});
-    let mut logs: ChatLogs = ChatLogs(vec!());
-    for raw_message in raw_messages_searched.hits {logs.0.push(raw_message.result);}
-    Ok(logs)
+    Ok(ChatLogs( raw_messages_searched.hits.into_iter().map(|msg| msg.result).collect()) )
   }
 
 
-pub async fn save_last_n_messages(http: &Http, chat_id: u64, n: u64) -> Result<SavedMessagesFromChannel, utils::Error>{
-    let channel: Channel = http.get_channel(chat_id).await.unwrap();
-    fn add_raw_message(raw_messages: &mut Vec<RawMessage>, message: &Message){
-        let referenced_message: Option<u64> = match message.referenced_message.clone(){
-            Some(m)=>{Some(m.id.0)}
-            None=>{None}
-        };
-
-
-        let raw_message = RawMessage{
-            user_name:message.author.clone().name,
-            id: message.id.0,
-            timestamp:message.timestamp.unix_timestamp(),
-            user: message.author.id.0,
-            user_image: message.author.clone().avatar_url().unwrap_or("NO AVATAR".into()),
-            message: message.clone().content,
-            reference_id: referenced_message
-        };
-        raw_messages.push(raw_message);
-    }
-    let channel_name;
-    let discord_messages: Vec<Message> =  match channel {
-        Channel::Guild(channel)=>{
-            if channel.nsfw {return Err(utils::Error::ChannelIsNSFW)};
-            channel_name = channel.name().into();
-            channel.messages(&http, |retriever| retriever.limit(n)).await.unwrap()
+pub async fn save_last_n_messages(http: &Http, channel_id: u64, n: u64) -> Result<SavedMessagesFromChannel, utils::Error>{
+    let messages: Vec<Message> = ChannelId(channel_id).messages(&http, |retriever| retriever.limit(n)).await.unwrap();
+    let raw_messages : Vec<RawMessage> = messages.iter().map(|message| {
+            let referenced_message: Option<u64> = match message.referenced_message.clone(){
+                Some(m)=>{Some(m.id.0)}
+                None=>{None}
+            };
+            RawMessage{user_name:message.author.clone().name,
+                id: message.id.0,
+                timestamp:message.timestamp.unix_timestamp(),
+                user: message.author.id.0,
+                user_image: message.author.clone().avatar_url().unwrap_or("NO AVATAR".into()),
+                message: message.clone().content,
+                reference_id: referenced_message,
+                read: false
+            }
         }
-        Channel::Private(channel)=>{
-            //PREVENTS SKETCHY DM WEIRDOS FROM... DATING THE AI
-            let owner: u64 = env!("DISCORD_BOT_OWNER").parse::<u64>().unwrap();
-            if channel.recipient.id != owner{return Err(utils::Error::PrivateChannelUserIsNotOwner)}
-
-            channel_name = channel.clone().recipient.name + "'s DM";
-            channel.messages(&http, |retriever| retriever.limit(n)).await.unwrap()
-        }
-        _=>{return Err(utils::Error::Generic)}
-    };
-
+    ).collect();
 
     let db = utils::get_database_client();
     let db_messages = db.index(utils::DBIndexes::RawMessage.as_str());
+    db_messages.add_documents(&raw_messages, None).await.unwrap();
 
-    let mut raw_messages : Vec<RawMessage> = vec!();
-    for message in discord_messages{
-        let idstr = message.id.0.to_string();
-        let id = idstr.as_str();
-        match db_messages.search().with_query(id).execute::<RawMessage>().await{
-            Ok(pages)=>{if pages.hits.len() == 0 {add_raw_message(&mut raw_messages, &message)}},
-            Err(_)=>{add_raw_message(&mut raw_messages, &message)}
-        }
-    }
-
-    db.index(utils::DBIndexes::RawMessage.as_str())
-        .add_documents(&raw_messages, None)
-        .await.unwrap();
-
-    Ok(SavedMessagesFromChannel{ channel_name: channel_name, quantity: raw_messages.len() })
+    Ok(SavedMessagesFromChannel{ channel_id: channel_id, quantity: raw_messages.len() })
+    
 }
 
 pub async fn save_message(message: Message, pre_defined_reference: Option<u64>) -> Result<SavedMessage, utils::Error>{
@@ -211,7 +201,8 @@ pub async fn save_message(message: Message, pre_defined_reference: Option<u64>) 
         user: message.author.id.0,
         user_image: message.author.clone().avatar_url().unwrap_or("NO AVATAR".into()),
         message: message.clone().content,
-        reference_id: referenced_message
+        reference_id: referenced_message,
+        read:false
     };
 
     db.index(utils::DBIndexes::RawMessage.as_str())
