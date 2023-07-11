@@ -89,7 +89,7 @@ impl ThebAI {
     
         let result = request.text()?;
     
-        println!("BAICHAT RESULT: {}", result);
+        //println!("BAICHAT RESULT: {}", result);
         //println!("{:?}", result.lines());
         let mut target_line: &str = "".into();
         for line in result.lines() {

@@ -11,6 +11,7 @@ impl Topics {
         let mut message_buffer : String = "".into();
         for log in logs.clone().0 {
           message_buffer += &log.message;
+          message_buffer += " ";
         }
         let stopwords: Vec<String> = stop_words::get(stop_words::LANGUAGE::Portuguese);
         let mut topics: Vec<String> = message_buffer.split_whitespace()

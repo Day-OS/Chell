@@ -20,3 +20,4 @@ stop-words = { version="0.7.2",   features = ["nltk", "iso"] }
 rand = "0.8.5"
 async-recursion = "1.0.4"
 json-gettext = "4.0.5"
+try-catch = "0.2.2"

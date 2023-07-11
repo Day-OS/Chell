@@ -41,7 +41,7 @@ enum BotState{
 impl BotState {
     fn get_cap(&self)->u64{
         match self {
-            BotState::Standby =>{200}
+            BotState::Standby =>{2000}
             BotState::Active => {100}
             _=>{panic!()}
         }
@@ -50,11 +50,13 @@ impl BotState {
 
 
 lazy_static::lazy_static!{
-    static ref MESSAGES_CAP : Mutex<u64> = Mutex::new(15);
+    static ref QUESTIONS_WAITING_ANSWERS: Mutex<Vec<WaitingAnswerArgs>> = Mutex::new(vec!());
+    static ref MESSAGES_CAP : Mutex<u64> = Mutex::new(BotState::Active.get_cap());
     static ref MESSAGES_COUNTER : Mutex<u64> = Mutex::new(0);
-    static ref BOT_STATE: Mutex<BotState> = Mutex::new(BotState::Active); //Mutex::new(BotState::WaitingAnswer(WaitingAnswerArgs { user_id: "236575283984072704".into(), message: 1125966367254913126 })); 
+    static ref BOT_STATE: Mutex<BotState> = Mutex::new(BotState::Active);
     static ref BOT_ID: Mutex<u64> = Mutex::new(0);
     static ref LAST_ACTIVITY_TIME: Mutex<i64> = Mutex::new(0);
+    static ref AICHAT: Mutex<baichat_rs::ThebAI> = Mutex::new(ai::get_ai());
 }
 pub async fn get_bot_id() -> u64{
     BOT_ID.lock().await.clone()
@@ -125,9 +127,12 @@ impl EventHandler for Handler {
         }
         
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-
         let (logs, maximum_cap): (ChatLogs, u64) = match state.clone() {
             BotState::Standby| BotState::Active=>{
+                if (LAST_ACTIVITY_TIME.lock().await.clone() - Timestamp::now().unix_timestamp()) > 900 {
+                    *state = BotState::Standby;
+                    return
+                }
                 if (message.content.contains(&format!("<@{}>", bot_id)) ||
                    message.content.contains(&format!("<@!{}>", bot_id)) ||
                    message.content.to_lowercase().contains("chell") ||
@@ -151,12 +156,8 @@ impl EventHandler for Handler {
             }
         };
 
-
-        //logs.filter_read();
-        println!("CHECK FILTER: {:?}", logs.build(target_message_id).await);
-
         //---------------------------------- GENERATING RESPONSE ----------------------------------
-
+        
         *LAST_ACTIVITY_TIME.lock().await = Timestamp::now().unix_timestamp();
         let typing = message.channel_id.start_typing(&ctx.http).unwrap();
 
@@ -164,7 +165,11 @@ impl EventHandler for Handler {
     
         let memories = memory_core::load_memory(topics).await;
         let memories: Option<String> = if memories.is_ok(){Some(memories.unwrap().to_string().await)} else{None};
-        let mut response =  match ai::reply(logs.build(target_message_id).await, memories.clone()).await{
+        let prompt  = logs.build(target_message_id).await;
+
+        println!("PROMPT: {}", prompt);
+        log::info!("PROMPT: {}", prompt);
+        let mut response =  match ai::reply(prompt, memories.clone()).await{
             Ok(res)=>{res},
             Err(_)=>{return}
         };
@@ -195,7 +200,7 @@ impl EventHandler for Handler {
             }
         };
 
-        //chat_logs::set_read(logs).await;
+        chat_logs::set_read(logs).await;
         //STATE SET HERE IS USED IN THE NEXT TIME THE EVENT IS FIRED
         if response.question { *state = BotState::WaitingAnswer(WaitingAnswerArgs { user_id: message.author.id.0.to_string(), message: message.id.0}) }
         else{ *state = BotState::Active }

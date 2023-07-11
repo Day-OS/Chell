@@ -37,11 +37,10 @@ pub async fn load_last_n_memories(n: usize, max_timestamp: Option<u64>) -> Resul
 }
 
 pub async fn load_memory(topics: Topics) -> Result<LoadedMemories, utils::Error>{
-  let memories :String = "".into();
   let hits =  match utils::get_database_client()
     .index(DBIndexes::InputMemory.as_str())
     .search().with_query(&topics.to_query())
-    .with_limit(1)
+    .with_limit(3)
     .execute::<Memory>().await{
         Ok(pages)=>{pages},
         Err(_)=>{return Err(utils::Error::NoMemoriesFound)}

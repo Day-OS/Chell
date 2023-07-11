@@ -57,11 +57,19 @@ impl ChatLogs {
                 }
             }
             else{
-                messages += &format!("ID DA MENSAGEM: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                raw_message.id,
-                serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                raw_message.user_name, 
-                raw_message.message);
+                if raw_message.read {
+                    messages += &format!("MENSAGEM PARA CONTEXTO | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
+                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                    raw_message.user_name, 
+                    raw_message.message);
+                }
+                else{
+                    messages += &format!("ID DA MENSAGEM: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
+                    raw_message.id,
+                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
+                    raw_message.user_name, 
+                    raw_message.message);
+                }
             }
         }
       }
