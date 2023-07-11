@@ -2,13 +2,16 @@ use std::env;
 
 mod baichat_rs;
 use crate::chat_logs::ChatLogs;
+use serenity::builder::CreateEmbed;
 use serenity::model::Timestamp;
+use serenity::utils::Colour;
 use serenity::{async_trait};
-use serenity::model::prelude::{Ready, interaction};
+use serenity::model::prelude::{Ready, interaction, Embed};
 use serenity::prelude::*;
 use serenity::model::channel::Message;
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{StandardFramework, CommandResult, Args};
+use serenity::model::prelude::UserId;
 use simplelog::*;
 use std::fs::File;
 use rand::Rng;
@@ -19,7 +22,6 @@ mod utils;
 mod topics;
 mod chat_logs;
 
-
 #[group]
 #[commands(memories)]
 struct General;
@@ -29,13 +31,14 @@ struct General;
 struct WaitingAnswerArgs {
     user_id: String,
     message: u64,
+    timestamp: i64,
 }
 
 #[derive(Clone, Debug)]
 enum BotState{
     Standby,
     Active,
-    WaitingAnswer(WaitingAnswerArgs) //STRING = USER_ID that the question was asked
+    DirectConversation //STRING = USER_ID that the question was asked
 }
 
 impl BotState {
@@ -99,12 +102,13 @@ impl EventHandler for Handler {
         let mut state = BOT_STATE.lock().await;
         let mut message_counter = MESSAGES_COUNTER.lock().await;
         let mut message_cap = MESSAGES_CAP.lock().await;
+        let mut questions_waiting_answers = QUESTIONS_WAITING_ANSWERS.lock().await;
 
         let bot_id: u64 = ctx.http.application_id().unwrap();
         
         match message.clone().referenced_message {
             Some(reply_message)=>{if reply_message.author.id == bot_id {
-                *state = BotState::WaitingAnswer(WaitingAnswerArgs { user_id: message.author.id.0.to_string(), message: message.id.0})
+                *state = BotState::DirectConversation
             }}
             None=>{}
         };
@@ -129,30 +133,42 @@ impl EventHandler for Handler {
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
         let (logs, maximum_cap): (ChatLogs, u64) = match state.clone() {
             BotState::Standby| BotState::Active=>{
-                if (LAST_ACTIVITY_TIME.lock().await.clone() - Timestamp::now().unix_timestamp()) > 900 {
-                    *state = BotState::Standby;
-                    return
+                let mut direct_conversation_args: Option<(ChatLogs, u64)> = None;
+                for (i, qwa) in questions_waiting_answers.clone().into_iter().enumerate(){
+                    if (qwa.timestamp - Timestamp::now().unix_timestamp()) > 60 {
+                        questions_waiting_answers.remove(i);
+                    }
+                    if qwa.user_id.parse::<u64>().unwrap() != message.author.id.0{continue}
+                    target_message_id = Some(message.id.0);
+                    questions_waiting_answers.remove(i);
+                    direct_conversation_args = Some((chat_logs::get_conversation_with_user(message.id.0).await.unwrap(), state.get_cap()))
                 }
-                if (message.content.contains(&format!("<@{}>", bot_id)) ||
-                   message.content.contains(&format!("<@!{}>", bot_id)) ||
-                   message.content.to_lowercase().contains("chell") ||
-                   *message_counter > *message_cap ) && message.author.id.0 != bot_id
-                {
-                    (chat_logs::get_last_n_messages(10).await.unwrap(), state.clone().get_cap())
+                if let Some(args) = direct_conversation_args {
+                    args
                 }
-                else{
-                    *message_counter += 1; 
-                    return
+                else {
+                    if (LAST_ACTIVITY_TIME.lock().await.clone() - Timestamp::now().unix_timestamp()) > 900 {
+                        *state = BotState::Standby;
+                        return
+                    }
+                    if (message.content.contains(&format!("<@{}>", bot_id)) ||
+                       message.content.contains(&format!("<@!{}>", bot_id)) ||
+                       message.content.to_lowercase().contains("chell") ||
+                       *message_counter > *message_cap) && message.author.id.0 != bot_id
+                    {
+                        (chat_logs::get_last_n_messages(10).await.unwrap(), state.clone().get_cap())
+                    }
+                    else{
+                        *message_counter += 1; 
+                        return
+                    }
                 }
+                
             }
-            BotState::WaitingAnswer(answer_args)=>{
-                if (LAST_ACTIVITY_TIME.lock().await.clone() - Timestamp::now().unix_timestamp()) > 60 {
-                    *state = BotState::Active;
-                    return
-                }
-                if message.author.id.0 != answer_args.user_id.parse::<u64>().unwrap(){return}
+            BotState::DirectConversation=>{
+                *state = BotState::Active;
                 target_message_id = Some(message.id.0);
-                (chat_logs::get_conversation_with_user(message.id.0).await.unwrap(), 2)
+                (chat_logs::get_conversation_with_user(message.id.0).await.unwrap(), state.get_cap())
             }
         };
 
@@ -186,6 +202,16 @@ impl EventHandler for Handler {
         };
     
         if response.question { response.message += &format!( " | ⤵️ ({})", message.author.name)}
+        let mut question_embed = serenity::builder::CreateEmbed::default();
+        question_embed
+        .title(format!("Aguardando uma resposta de: {}!", message.author.name))
+        .color(Colour::new(0x3b88c3))
+        .footer(|f| f.text("A próxima mensagem deste usuário será lida").icon_url("https://discord.com/assets/0a925256fa01e07f5a7986c1e4fee0c9.svg"));
+        let mut learned_embed = serenity::builder::CreateEmbed::default();
+        question_embed
+        .title(format!("{} Aprendeu: {}!", UserId(bot_id).to_user(&ctx.http).await.unwrap().name, response.clone().learned.unwrap_or("Nothing!".into())))
+        .color(Colour::new(0xf4abba))
+        .footer(|f| f.icon_url("https://discord.com/assets/0bf5972bff8b8b4c26621bd5cd25d839.svg"));
         _ = match reply_target {
             Some(target)=>{
                 log::info!("Answered {}'s message. | Response: {}", target.author.name, response.message.clone());
@@ -194,16 +220,23 @@ impl EventHandler for Handler {
             None=>{
                 log::info!("Sent a message to everyone in chat. | Response: {}", response.message.clone());
                 message.channel_id.send_message(&ctx.http, |m|{
-                    m.content(response.message.clone())
+                    m.content(response.message.clone());
+                    if response.question {
+                        m.add_embeds(vec!(question_embed));
+                    }
+                    if response.learned.is_some() {
+                        m.add_embeds(vec!(learned_embed));
+                    }
+                    m
                 }).await.unwrap()
                 
             }
         };
 
-        chat_logs::set_read(logs).await;
+        _ = chat_logs::set_read(logs).await;
         //STATE SET HERE IS USED IN THE NEXT TIME THE EVENT IS FIRED
-        if response.question { *state = BotState::WaitingAnswer(WaitingAnswerArgs { user_id: message.author.id.0.to_string(), message: message.id.0}) }
-        else{ *state = BotState::Active }
+        if response.question { questions_waiting_answers.push(WaitingAnswerArgs { user_id: message.author.id.0.to_string(), message: message.id.0, timestamp: Timestamp::now().unix_timestamp()}) }
+        else{}
         _ = memory_core::save_memory(&response).await;
 
         
