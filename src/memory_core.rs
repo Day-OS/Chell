@@ -62,7 +62,6 @@ pub async fn save_memory(input_memory: &ai::ResponseMessage) -> Result<SavedMemo
                           content:learned
                         };
   let content = memory.clone().content;
-  println!("{:?}", memory);
   match utils::get_database_client()
         .index(DBIndexes::InputMemory.as_str())
         .add_documents(&[memory], None)

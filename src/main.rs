@@ -2,15 +2,14 @@ use std::env;
 
 mod baichat_rs;
 use crate::chat_logs::ChatLogs;
-use serenity::builder::CreateEmbed;
 use serenity::model::Timestamp;
 use serenity::utils::Colour;
 use serenity::{async_trait};
-use serenity::model::prelude::{Ready, interaction, Embed};
+use serenity::model::prelude::{Ready, MessageReference};
 use serenity::prelude::*;
 use serenity::model::channel::Message;
 use serenity::framework::standard::macros::{command, group};
-use serenity::framework::standard::{StandardFramework, CommandResult, Args};
+use serenity::framework::standard::{StandardFramework, CommandResult, };
 use serenity::model::prelude::UserId;
 use simplelog::*;
 use std::fs::File;
@@ -201,43 +200,45 @@ impl EventHandler for Handler {
             None => None,
         };
     
-        if response.question { response.message += &format!( " | ⤵️ ({})", message.author.name)}
+        //if response.question { response.message += &format!( " | ⤵️ ({})", message.author.name)}
         let mut question_embed = serenity::builder::CreateEmbed::default();
         question_embed
         .title(format!("Aguardando uma resposta de: {}!", message.author.name))
         .color(Colour::new(0x3b88c3))
-        .footer(|f| f.text("A próxima mensagem deste usuário será lida").icon_url("https://discord.com/assets/0a925256fa01e07f5a7986c1e4fee0c9.svg"));
+        .footer(|f| f.text("A próxima mensagem deste usuário será lida").icon_url("https://media.discordapp.net/attachments/825482981954027561/1128417446827655228/emoji.png?width=32&height=32"));
         let mut learned_embed = serenity::builder::CreateEmbed::default();
-        question_embed
-        .title(format!("{} Aprendeu: {}!", UserId(bot_id).to_user(&ctx.http).await.unwrap().name, response.clone().learned.unwrap_or("Nothing!".into())))
+        learned_embed
+        .title(format!("{} Aprendeu algo!", UserId(bot_id).to_user(&ctx.http).await.unwrap().name))
         .color(Colour::new(0xf4abba))
-        .footer(|f| f.icon_url("https://discord.com/assets/0bf5972bff8b8b4c26621bd5cd25d839.svg"));
-        _ = match reply_target {
-            Some(target)=>{
+        .footer(|f| f.text(format!("\"{}\"", response.clone().learned.unwrap_or("Nothing!".into()))).icon_url("https://cdn.discordapp.com/attachments/825482981954027561/1128417559868362823/emoji.png?width=32&height=32"));
+        
+        message.channel_id.send_message(&ctx.http, |m|{
+            m.content(response.message.clone());
+            if let Some(target) = reply_target {
+                m.reference_message(MessageReference::from(&target));
                 log::info!("Answered {}'s message. | Response: {}", target.author.name, response.message.clone());
-                target.reply(&ctx.http, response.message.clone()).await.unwrap()
             }
-            None=>{
+            else{
                 log::info!("Sent a message to everyone in chat. | Response: {}", response.message.clone());
-                message.channel_id.send_message(&ctx.http, |m|{
-                    m.content(response.message.clone());
-                    if response.question {
-                        m.add_embeds(vec!(question_embed));
-                    }
-                    if response.learned.is_some() {
-                        m.add_embeds(vec!(learned_embed));
-                    }
-                    m
-                }).await.unwrap()
-                
             }
-        };
+            if response.question {
+                m.add_embeds(vec!(question_embed));
+            }
+            if response.learned.is_some() {
+                m.add_embeds(vec!(learned_embed));
+            }
+            m
+        }).await.unwrap();
+
+
 
         _ = chat_logs::set_read(logs).await;
         //STATE SET HERE IS USED IN THE NEXT TIME THE EVENT IS FIRED
         if response.question { questions_waiting_answers.push(WaitingAnswerArgs { user_id: message.author.id.0.to_string(), message: message.id.0, timestamp: Timestamp::now().unix_timestamp()}) }
         else{}
-        _ = memory_core::save_memory(&response).await;
+        if let Ok(memory) = memory_core::save_memory(&response).await{
+            log::info!("Learned {}!", memory.0)
+        };
 
         
         _ = typing.stop();

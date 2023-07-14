@@ -5,6 +5,7 @@ pub enum Error{
     PrivateChannelUserIsNotOwner,
     Generic,
     NoTopicsFound,
+    CouldntGenerateResponseFromAI,
     NoMemoriesToBeSaved,
     NoMemoriesFound,
     NoMessagesFound,

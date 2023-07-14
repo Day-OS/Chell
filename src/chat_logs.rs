@@ -34,45 +34,34 @@ impl ChatLogs {
       let bot_id = crate::get_bot_id().await;
       let mut messages: String = "".into();
       for raw_message in self.0.clone() {
-        if raw_message.user == bot_id {
-            messages += &format!("SUA MENSAGEM! | TEMPO: {} - Você respondeu = {}\n", 
-                            serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                            raw_message.message
-                        );
-        }
-        else{
-            if target_message_id.is_some(){
+
+        let message_timestamp = serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string();
+
+        let (message_identifier, message_owner) = 
+        if raw_message.user == bot_id{
+            ("SUA MENSAGEM!".into(), "Você".into())
+        }else{
+            let message_owner = format!("NOME DE USUÁRIO:'{}'", raw_message.user_name);
+            if target_message_id.is_some() {
                 if raw_message.id == target_message_id.unwrap() {
-                    messages += &format!("ID DA MENSAGEM QUE PRECISA SER RESPONDIDO: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                    raw_message.id,
-                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                    raw_message.user_name, 
-                    raw_message.message);
+                    (format!("ID DA MENSAGEM QUE PRECISA SER RESPONDIDO: {}", raw_message.id), message_owner)
                 }
                 else{
-                    messages += &format!("MENSAGEM PARA CONTEXTO | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                    raw_message.user_name, 
-                    raw_message.message);
+                   ("MENSAGEM PARA CONTEXTO!".into(), message_owner)
                 }
             }
             else{
-                if raw_message.read {
-                    messages += &format!("MENSAGEM PARA CONTEXTO | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                    raw_message.user_name, 
-                    raw_message.message);
-                }
-                else{
-                    messages += &format!("ID DA MENSAGEM: {} | TEMPO: {} - NOME DE USUÁRIO:'{}' disse = {}\n", 
-                    raw_message.id,
-                    serenity::model::Timestamp::from_unix_timestamp(raw_message.timestamp).unwrap().to_string(), 
-                    raw_message.user_name, 
-                    raw_message.message);
-                }
+                (format!("ID DA MENSAGEM: {}", raw_message.id), message_owner)
             }
+            
+        };
+        messages += &format!("{} | TEMPO: {} - {} respondeu = {}",
+                            message_identifier,
+                            message_timestamp,
+                            message_owner,
+                            raw_message.message
+                            );
         }
-      }
       messages
     }
     pub fn filter_read(&mut self){
