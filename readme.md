@@ -18,4 +18,5 @@ Chell (the character) is a young cute girl trapped inside a computer that is sti
 - [X] DO SO THE BOT REPLIES WHEN SOMEONE IS REFERENCING HIM.
 - [X] ALTERNATE STATES (COUNTDOWN)
 - [ ] MAKE THE BOT ANSWER THE RIGHT PERSON
+- [ ] Translate prompts to english (MultiLanguage Prompts)
 - [ ] chat_logs::get_conversation_with_user needs to get the right context (it is not getting the right answers!) Solution: Create a second argument that is the response and include it as an answer to the logs.
