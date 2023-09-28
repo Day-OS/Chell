@@ -5,7 +5,7 @@ The objective of the project is to create a character that interacts with everyo
 
 
 ## Database
-This project uses Meilisearch as its Database. Even though it is not a website application that would need a search engine for that, it was chosen because of the need of having fast answers when searching for a memory, like was said in a simpler way earlier, Chell uses "Topics", relevant words from the chat messages, to search for memory documents that contain said topics.
+This project uses Meilisearch as its database. Even though it is not a website application that would need a search engine, it was chosen because of the need to provide fast answers when searching for a memory. As mentioned earlier, Chell uses "Topics," which are relevant words from the chat messages, to search for memory documents that contain these topics.
 
 ## Who is Chell?
 ![Chell's character Drinking Grimace Shake, Art made by Necholitos.](assets/grimace-shake-by-necholitos.png)
